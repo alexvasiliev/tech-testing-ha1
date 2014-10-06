@@ -1,4 +1,4 @@
--- vim: set ft=lua et :
+lu-- vim: set ft=lua et :
 
 --  The library is free software; you can redistribute it and/or modify it
 --  under the terms of either:
