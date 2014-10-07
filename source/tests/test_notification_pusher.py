@@ -1,8 +1,10 @@
 import unittest
 import mock
 import tarantool
+import tarantool_queue
 import json
 from source import notification_pusher
+from argparse import Namespace
 
 def stop_notification_pusher(*smth):
     notification_pusher.run_application = False
@@ -10,20 +12,19 @@ def stop_notification_pusher(*smth):
 def start_notification_pusher(*smth):
     notification_pusher.run_application = True
 
+
+
 class NotificationPusherTestCase(unittest.TestCase):
 
     def setUp(self):
 		self.config = mock.Mock()
 		self.config.QUEUE_PORT 	= 42
 		self.config.QUEUE_HOST 	= '0.0.0.0'
-		self.config.QUEUE_SPACE = 0
-		self.config.QUEUE_TAKE_TIMEOUT = 0
 		self.config.WORKER_POOL_SIZE = 1
-		self.config.SLEEP = 0
-		self.config.QUEUE_TUBE = 'tube'
+		notification_pusher.logger = mock.MagicMock()
+
 
     def test_stop_handler(self):
-        notification_pusher.run_application = True
         notification_pusher.stop_handler(notification_pusher.exit_code)
         self.assertFalse(notification_pusher.run_application)
 
@@ -31,7 +32,7 @@ class NotificationPusherTestCase(unittest.TestCase):
         task = mock.Mock()
         task_queue = mock.Mock()
         task_queue.qsize = mock.Mock(return_value = 1)
-        task_queue.get_nowait = mock.Mock(return_value = (task, 'action'))
+        task_queue.get_nowait = mock.Mock(return_value = (task, 'task_method'))
         logger = mock.MagicMock()
         with mock.patch('notification_pusher.logger', logger):
             notification_pusher.done_with_processed_tasks(task_queue)
@@ -86,31 +87,72 @@ class NotificationPusherTestCase(unittest.TestCase):
             notification_pusher.main_loop(self.config)
         task_done.assert_called_once()
 
-    def test_mainloop_worker_fail(self):
-        taker = mock.MagicMock()
-        with mock.patch('tarantool_queue.tarantool_queue.Tube.take', taker):
-            with mock.patch('notification_pusher.sleep', mock.Mock(side_effect=stop_notification_pusher)):
-                notification_pusher.main_loop(self.config)
-        self.assertFalse(taker.called)
-
-    def test_mainloop_worker_succ(self):
-        worker = mock.Mock()
-        with mock.patch('gevent.Greenlet', mock.Mock(return_value=worker)):
-            with mock.patch('notification_pusher.sleep', mock.Mock(side_effect=stop_notification_pusher)):
-                notification_pusher.main_loop(self.config)
-        worker.start.assert_called_once()
-
-    def test_mainloop_app_no_run(self):
-        m_logger_info = mock.MagicMock()
-        notification_pusher.run_application = False
-        with mock.patch('notification_pusher.logger.info', m_logger_info):
-            notification_pusher.main_loop(self.config)
-        m_logger_info.assert_called_with('Stop application loop.')
-        notification_pusher.run_application = True
-
     def test_install_signal_handlers(self):
         with mock.patch('gevent.signal', mock.Mock()) as signal:
             notification_pusher.install_signal_handlers()
         assert signal.called
 
+    @mock.patch('source.notification_pusher.done_with_processed_tasks', mock.Mock())
+    def test_main_loop(self):
+        worker = mock.MagicMock()
+        queue = mock.Mock(name="queue")
+        tarantool_queue.Queue = mock.Mock(return_value=queue)
 
+        with mock.patch('source.notification_pusher.Pool.add', mock.Mock()) as pool_add:
+            with mock.patch('source.notification_pusher.sleep', stop_notification_pusher), \
+                mock.patch('source.notification_pusher.Pool.free_count', mock.Mock(return_value=1)), \
+                mock.patch('source.notification_pusher.Greenlet', mock.Mock(return_value=worker)):
+                notification_pusher.main_loop(self.config)
+
+        worker.add.assert_called_once()
+        pool_add.assert_called_once()
+
+    def test_main_loop_no_task(self):
+        queue = mock.Mock(name="queue")
+        queue.tube().take = mock.Mock(return_value=None)
+        tarantool_queue.Queue = mock.Mock(return_value=queue)
+
+        with mock.patch('source.notification_pusher.sleep', stop_notification_pusher),\
+             mock.patch('source.notification_pusher.Greenlet', mock.Mock()) as creation:
+            notification_pusher.main_loop(self.config)
+
+        assert not creation.called
+
+    def test_main(self):
+        setattr(self.config, "LOGGING", {"version": 1})
+        notification_pusher.parse_cmd_args = mock.Mock()
+        notification_pusher.parse_cmd_args.return_value = Namespace(daemon=False, config='config', pidfile=False)
+        with mock.patch('source.notification_pusher.main_loop', mock.Mock(side_effect=stop_notification_pusher)) as main_loop, \
+             mock.patch('source.notification_pusher.load_config_from_pyfile', mock.Mock(return_value=self.config)),\
+             mock.patch('source.notification_pusher.install_signal_handlers', mock.Mock()),\
+             mock.patch('source.notification_pusher.patch_all', mock.Mock()):
+                notification_pusher.main([])
+
+        main_loop.assert_called_once_with(self.config)
+
+    def test_main_with_pidfile(self):
+        setattr(self.config, "LOGGING", {"version": 1})
+        notification_pusher.parse_cmd_args = mock.Mock()
+        stop_notification_pusher();
+        notification_pusher.parse_cmd_args.return_value = Namespace(daemon=False, config='config', pidfile=True)
+        with mock.patch('source.notification_pusher.load_config_from_pyfile', mock.Mock(return_value=self.config)), \
+                mock.patch('source.notification_pusher.create_pidfile', mock.Mock()) as create_pidfile,\
+                mock.patch('source.notification_pusher.install_signal_handlers', mock.Mock()),\
+                mock.patch('source.notification_pusher.patch_all', mock.Mock()):
+                notification_pusher.main([])
+        assert create_pidfile.called
+
+    def test_main_with_daemonize(self):
+        setattr(self.config, "LOGGING", {"version": 1})
+        stop_notification_pusher();
+        notification_pusher.parse_cmd_args.return_value = Namespace(daemon=True, config='config', pidfile=False)
+        with mock.patch('source.notification_pusher.load_config_from_pyfile', mock.Mock(return_value=self.config)), \
+             mock.patch('source.notification_pusher.daemonize', mock.Mock()) as daemonize,\
+             mock.patch('source.notification_pusher.install_signal_handlers', mock.Mock()),\
+             mock.patch('source.notification_pusher.patch_all', mock.Mock()):
+                notification_pusher.main([])
+
+        assert daemonize.called
+
+    def tearDown(self):
+        start_notification_pusher()
