@@ -90,17 +90,3 @@ class InitTestCase(unittest.TestCase):
 
     #    print result
     #    pass
-
-    def test_make_curl_request(self):
-        content = "VK.com"
-        redirect_url = u"abc"
-        mock_curl = mock.MagicMock()
-        mock_curl.getinfo = mock.Mock(return_value=redirect_url)
-        mock_curl.setopt = mock.Mock()
-        mock_io_string = mock.MagicMock()
-        mock_io_string.getvalue = mock.Mock(return_value=content)
-        with mock.patch('source.lib.StringIO', mock.Mock(return_value=mock_io_string)):
-            with mock.patch('pycurl.Curl', mock.Mock(return_value=mock_curl)):
-                with mock.patch('source.lib.to_str', mock.Mock()):
-                        with mock.patch('source.lib.prepare_url', mock.Mock()):
-                            self.assertEqual(init.make_pycurl_request('http://test.rg', 10), (content, redirect_url))
