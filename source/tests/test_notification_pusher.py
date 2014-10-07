@@ -10,6 +10,8 @@ def stop_notification_pusher(*smth):
 def start_notification_pusher(*smth):
     notification_pusher.run_application = True
 
+
+
 class NotificationPusherTestCase(unittest.TestCase):
 
     def setUp(self):
@@ -17,9 +19,9 @@ class NotificationPusherTestCase(unittest.TestCase):
 		self.config.QUEUE_PORT 	= 42
 		self.config.QUEUE_HOST 	= '0.0.0.0'
 		self.config.QUEUE_SPACE = 0
-		self.config.QUEUE_TAKE_TIMEOUT = 0
+		self.config.QUEUE_TAKE_TIMEOUT = 10
 		self.config.WORKER_POOL_SIZE = 1
-		self.config.SLEEP = 0
+		self.config.SLEEP = 1
 		self.config.QUEUE_TUBE = 'tube'
 
     def test_stop_handler(self):
@@ -113,4 +115,47 @@ class NotificationPusherTestCase(unittest.TestCase):
             notification_pusher.install_signal_handlers()
         assert signal.called
 
+    def test_main_run_succ(self):
+        main_loop = mock.Mock(side_effect = stop_notification_pusher)
+        start_notification_pusher()
+        with mock.patch('source.redirect_checker.load_config_from_pyfile', mock.Mock(return_value=self.config)):
+            with mock.patch('notification_pusher.sleep', mock.Mock(side_effect=stop_notification_pusher)) as sleep:
+                with mock.patch('notification_pusher.logger', mock.Mock()):
+                    with mock.patch('notification_pusher.main_loop', main_loop):
+                        with mock.patch('notification_pusher.daemonize', mock.Mock()):
+                            with mock.patch('notification_pusher.patch_all', mock.Mock()):
+                                with mock.patch('notification_pusher.create_pidfile', mock.Mock()):
+                                    notification_pusher.main(['','-c', './source/config/pusher_config.py'])
 
+        main_loop.assert_called_once()
+
+
+    def test_main_run_fail(self):
+        logger = mock.Mock()
+        main_loop = mock.Mock(side_effect = Exception("E"))
+        start_notification_pusher()
+        with mock.patch('source.redirect_checker.load_config_from_pyfile', mock.Mock(return_value=self.config)):
+            with mock.patch('notification_pusher.sleep', mock.Mock(side_effect=stop_notification_pusher)) as sleep:
+                with mock.patch('notification_pusher.logger', logger):
+                    with mock.patch('notification_pusher.main_loop', main_loop):
+                        with mock.patch('notification_pusher.daemonize', mock.Mock()):
+                            with mock.patch('notification_pusher.patch_all', mock.Mock()):
+                                with mock.patch('notification_pusher.create_pidfile', mock.Mock()):
+                                    with mock.patch('notification_pusher.parse_cmd_args', mock.Mock()):
+                                        notification_pusher.main(['','-c', './source/config/pusher_config.py'])
+        main_loop.assert_called_once()
+        sleep.assert_called_once()
+
+    def test_main_pidfile_succ(self):
+        main_loop = mock.Mock(side_effect = stop_notification_pusher)
+        start_notification_pusher()
+        with mock.patch('source.redirect_checker.load_config_from_pyfile', mock.Mock(return_value=self.config)):
+                with mock.patch('notification_pusher.logger', mock.Mock()) as m_logger:
+                    with mock.patch('notification_pusher.main_loop', main_loop):
+                        with mock.patch('notification_pusher.daemonize', mock.Mock()) as m_daemonize:
+                            with mock.patch('notification_pusher.patch_all', mock.Mock()):
+                                with mock.patch('notification_pusher.create_pidfile', mock.Mock()) as m_create_pidfile:
+                                    notification_pusher.main(['','-c', './source/config/pusher_config.py', '-P', '0'])
+        self.assertFalse(m_daemonize.called)
+        self.assertTrue(m_create_pidfile.called)
+        self.assertTrue(m_logger.info.called)
