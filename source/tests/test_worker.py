@@ -77,7 +77,6 @@ class WorkerTestCase(unittest.TestCase):
 
 
     def test_worker_with_no_task(self):
-        print "test_worker_with_no_task"
         config = mock.Mock()
         input_tube = mock.MagicMock()
         input_tube.take = mock.Mock(return_value=None)
@@ -87,7 +86,6 @@ class WorkerTestCase(unittest.TestCase):
             with mock.patch('source.lib.worker.logger', mock.Mock()):
                 with mock.patch('os.path.exists', mock.Mock(side_effect=[True, False])):
                     worker.worker(config, parent_pid)
-        print "test_worker_with_no_task ended"
         pass
 
     """
