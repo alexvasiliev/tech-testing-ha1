@@ -4,6 +4,12 @@ import tarantool
 import json
 from source import notification_pusher
 
+def stop_notification_pusher(*smth):
+    notification_pusher.run_application = False
+
+def start_notification_pusher(*smth):
+    notification_pusher.run_application = True
+
 class NotificationPusherTestCase(unittest.TestCase):
 
     def setUp(self):
@@ -113,3 +119,25 @@ class NotificationPusherTestCase(unittest.TestCase):
         with mock.patch('os.fork', mock.Mock(side_effect=[0, OSError("Error")])):
             with mock.patch('os.setsid', mock.Mock()):
                 self.assertRaises(Exception, notification_pusher.daemonize)
+
+    def test_mainloop_conf_succ(self):
+        task_queue = mock.Mock(side_effect = stop_notification_pusher)
+        task_done = mock.MagicMock()
+        with mock.patch('gevent.queue.Queue', task_queue), mock.patch('notification_pusher.done_with_processed_tasks', task_done):
+            notification_pusher.main_loop(self.config)
+        task_done.assert_called_once()
+
+    def test_mainloop_worker_fail(self):
+        taker = mock.MagicMock()
+        with mock.patch('tarantool_queue.tarantool_queue.Tube.take', taker):
+            with mock.patch('notification_pusher.sleep', mock.Mock(side_effect=stop_notification_pusher)):
+                notification_pusher.main_loop(self.config)
+        self.assertFalse(taker.called)
+
+    def test_mainloop_worker_succ(self):
+        worker = mock.Mock()
+        with mock.patch('tarantool_queue.tarantool_queue.Tube.take', mock.MagicMock()) as taker,\
+             mock.patch('gevent.Greenlet', mock.Mock(return_value=worker)):
+            with mock.patch('notification_pusher.sleep', mock.Mock(side_effect=stop_notification_pusher)):
+                notification_pusher.main_loop(self.config)
+        worker.start.assert_called_once()
