@@ -17,11 +17,12 @@ def start_notification_pusher(*smth):
 class NotificationPusherTestCase(unittest.TestCase):
 
     def setUp(self):
-		self.config = mock.Mock()
-		self.config.QUEUE_PORT 	= 42
-		self.config.QUEUE_HOST 	= '0.0.0.0'
-		self.config.WORKER_POOL_SIZE = 1
-		notification_pusher.logger = mock.MagicMock()
+        self.config = mock.Mock()
+        self.config.QUEUE_PORT 	= 42
+        self.config.QUEUE_HOST 	= '0.0.0.0'
+        self.config.WORKER_POOL_SIZE = 1
+        self.config.QUEUE_SPACE  = 0
+        notification_pusher.logger = mock.MagicMock()
 
 
     def test_stop_handler(self):
@@ -80,32 +81,10 @@ class NotificationPusherTestCase(unittest.TestCase):
             notification_pusher.notification_worker(task, task_queue)
         task_queue.put.assert_called_with((task, 'bury'))
 
-    def test_mainloop_conf_succ(self):
-        task_queue = mock.Mock(side_effect = stop_notification_pusher)
-        task_done = mock.MagicMock()
-        with mock.patch('gevent.queue.Queue', task_queue), mock.patch('notification_pusher.done_with_processed_tasks', task_done):
-            notification_pusher.main_loop(self.config)
-        task_done.assert_called_once()
-
     def test_install_signal_handlers(self):
         with mock.patch('gevent.signal', mock.Mock()) as signal:
             notification_pusher.install_signal_handlers()
         assert signal.called
-
-    @mock.patch('source.notification_pusher.done_with_processed_tasks', mock.Mock())
-    def test_main_loop(self):
-        worker = mock.MagicMock()
-        queue = mock.Mock(name="queue")
-        tarantool_queue.Queue = mock.Mock(return_value=queue)
-
-        with mock.patch('source.notification_pusher.Pool.add', mock.Mock()) as pool_add:
-            with mock.patch('source.notification_pusher.sleep', stop_notification_pusher), \
-                mock.patch('source.notification_pusher.Pool.free_count', mock.Mock(return_value=1)), \
-                mock.patch('source.notification_pusher.Greenlet', mock.Mock(return_value=worker)):
-                notification_pusher.main_loop(self.config)
-
-        worker.add.assert_called_once()
-        pool_add.assert_called_once()
 
     def test_main_loop_no_task(self):
         queue = mock.Mock(name="queue")
